@@ -1,5 +1,7 @@
 'use strict';
 const express=require('express');
+const multer=require('multer');
+const pdfParse=require('pdf-parse');
 const Database=require('better-sqlite3');
 const helmet=require('helmet');
 const {rateLimit}=require('express-rate-limit');
@@ -71,6 +73,52 @@ context
   audit('chat',cid);
   res.json({conversation_id:cid,answer,model,sources:refs.map(x=>({id:x.id,title:x.title}))});
 }));
+
+const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:10*1024*1024,files:1}});
+function safeTextBuffer(buffer,name){
+ const ext=path.extname(name||'').toLowerCase();
+ if(ext==='.txt'||ext==='.md'||ext==='.csv')return Promise.resolve(buffer.toString('utf8'));
+ if(ext==='.pdf'&&buffer.subarray(0,5).toString()==='%PDF-')return pdfParse(buffer).then(r=>r.text||'');
+ bad('Supported formats: PDF, TXT, MD, CSV',400);
+}
+function saveSource(title,type,url,body){
+ const text=String(body||'').trim().slice(0,100000);
+ if(!text)bad('Tidak ada teks yang dapat diekstrak. PDF hasil scan memerlukan OCR.',422);
+ const result=db.prepare('INSERT INTO knowledge(title,source_type,url,body,status,created_at) VALUES(?,?,?,?,?,?)').run(title,type,url,text,'draft',stamp());
+ audit('knowledge_extracted',result.lastInsertRowid);return {id:Number(result.lastInsertRowid),status:'draft',characters:text.length};
+}
+app.post('/api/knowledge/upload',upload.single('file'),wrap(async(req,res)=>{
+ if(!req.file)bad('Choose a file');
+ const title=String(req.body.title||req.file.originalname).slice(0,180);
+ const body=await safeTextBuffer(req.file.buffer,req.file.originalname);
+ res.json(saveSource(title,'pdf',req.file.originalname,body));
+}));
+app.post('/api/knowledge/drive',wrap(async(req,res)=>{
+ const link=String(req.body?.url||'').trim(),title=String(req.body?.title||'Google Drive source').slice(0,180);
+ let u;try{u=new URL(link)}catch{bad('Invalid Google Drive link')}
+ if(u.protocol!=='https:'||!['drive.google.com','docs.google.com'].includes(u.hostname)||u.username||u.password)bad('Only official Google Drive HTTPS links accepted');
+ const id= u.pathname.match(/\/d\/([a-zA-Z0-9_-]{15,})/)?.[1] || (u.pathname==='/file/d/'?null:u.searchParams.get('id'));
+ if(!id||!/^[a-zA-Z0-9_-]{15,}$/.test(id))bad('Unsupported Drive file link. Use Share > Copy link for a file.');
+ // No arbitrary URL fetching, one fixed Google-hosted endpoint and strict byte limit.
+ const download='https://drive.google.com/uc?export=download&id='+encodeURIComponent(id);
+ const ctrl=new AbortController(),timeout=setTimeout(()=>ctrl.abort(),18000);
+ try{
+  const response=await fetch(download,{signal:ctrl.signal,redirect:'manual',headers:{'User-Agent':'RM-SmartKit/1.0'}});
+  if(response.status>=300&&response.status<400)bad('Google Drive memerlukan login atau konfirmasi download. Download file lalu gunakan Upload Perangkat.',422);
+  if(!response.ok)bad('Tidak dapat mengambil file publik dari Google Drive (HTTP '+response.status+').',422);
+  const len=Number(response.headers.get('content-length')||0);
+  if(len>10*1024*1024)bad('File exceeds 10 MB',413);
+  const chunks=[];let count=0;
+  for await(const piece of response.body){count+=piece.length;if(count>10*1024*1024)bad('File exceeds 10 MB',413);chunks.push(Buffer.from(piece))}
+  const bytes=Buffer.concat(chunks);
+  const pdf=bytes.subarray(0,5).toString()==='%PDF-';
+  const ct=response.headers.get('content-type')||'';
+  if(!pdf&&!ct.startsWith('text/plain'))bad('Link tidak menyediakan PDF/TXT langsung. Download dari Drive lalu upload dari perangkat.',422);
+  const text=pdf?(await pdfParse(bytes)).text:bytes.toString('utf8');
+  res.json(saveSource(title,pdf?'pdf':'text',link,text));
+ }finally{clearTimeout(timeout)}
+}));
+
 app.get('/api/knowledge',wrap((req,res)=>res.json(db.prepare('SELECT id,title,source_type,url,status FROM knowledge ORDER BY id DESC').all())));
 app.post('/api/knowledge',wrap((req,res)=>{
   const b=req.body||{};requireText(b.title,180);
