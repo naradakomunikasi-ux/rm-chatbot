@@ -134,4 +134,6 @@ app.post('/api/skills',wrap((req,res)=>{const t=requireText(req.body?.title,140)
 app.get('/api/capabilities',wrap((req,res)=>{const rows=db.prepare('SELECT * FROM models').all();res.json(CAPS.map(capability=>({capability,model:rows.find(x=>x.capability===capability)?.model||''})))}));
 app.put('/api/capabilities/:cap',wrap((req,res)=>{const cap=req.params.cap;if(!CAPS.includes(cap))bad('Unknown capability',404);const model=requireText(req.body?.model,200);db.prepare('INSERT INTO models(capability,model) VALUES(?,?) ON CONFLICT(capability) DO UPDATE SET model=excluded.model').run(cap,model);audit('model_assigned',cap);res.json({ok:true,fallback:false})}));
 app.get('/api/audit',wrap((req,res)=>res.json(db.prepare('SELECT * FROM audit ORDER BY id DESC LIMIT 100').all())));
+const {mountBanking}=require('./banking');
+mountBanking(app,db);
 const port=Number(process.env.PORT||3000);app.listen(port,'0.0.0.0',()=>console.log('RM SmartKit on port '+port));
