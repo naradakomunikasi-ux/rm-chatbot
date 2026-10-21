@@ -87,3 +87,14 @@ The v2 role checks are a baseline only; **per-user and per-tenant data isolation
 - **Release decision:** **PRODUCTION HOLD** pending implementation/security/QA evidence.
 
 © RM SmartKit project. No banking advice or automated lending decisions are authorized by the prototype.
+
+
+## Hostinger Full Stack / Node.js deployment (current implementation)
+
+The repository root now contains **`package.json`** and **`server.js`**. For Hostinger Node.js importer select `main`, install dependencies with `npm install`, and use `npm start` as the startup command. Use Node.js 20+ with support for native npm modules. Backend is **Express** with **SQLite (`better-sqlite3`)**; `app/index.html` is served at `/`.
+
+Configure **environment variables in the hosting dashboard**, not GitHub: `RM_APP_TOKEN` (long random required shared development token), `OLLAMA_BASE_URL` (Ollama server reachable from Hostinger over HTTPS, not localhost on your personal computer), `OLLAMA_API_KEY` (only if required), `OLLAMA_MODEL`, and optionally `RM_DB_PATH` (absolute writable path on persistent storage), `PORT` (platform-assigned).
+
+**SQLite warning:** a path inside an ephemeral container may be erased on redeploy/restart. Check Hostinger persistent filesystem support and point `RM_DB_PATH` at a persistent, writable directory; back up DB with WAL consistency. The app does not implement real user authentication/tenant isolation on the Node path; `RM_APP_TOKEN` is a development-only gate, never a replacement for SSO/RBAC in a bank. There is no website crawler/PDF parser or DOCX/XLSX/PDF export engine on this Node runtime yet; `app/index.html` currently provides metadata/drafting interfaces. Do not deploy for real bank customer data until these features and security controls are ported and validated.
+
+`curl` health check: set `X-App-Token` to your configured token when calling `/api/health`. When the importer says **no package.json**, refresh/re-import branch `main` after the latest commit.
