@@ -35,6 +35,7 @@ async function ollama(endpoint,payload){
   }catch(e){if(e.httpCode)throw e;bad('Ollama unavailable or timed out',502)}finally{clearTimeout(timer)}
 }
 app.get('/',(req,res)=>res.sendFile(path.join(root,'app','index.html')));
+app.get('/banking',(req,res)=>res.sendFile(path.join(root,'app','banking.html')));
 app.get('/api/health',wrap((req,res)=>res.json({ok:true,storage:'sqlite',engine:'node'})));
 app.get('/api/models',wrap(async(req,res)=>res.json(await ollama('/api/tags'))));
 app.get('/api/conversations',wrap((req,res)=>res.json(db.prepare('SELECT * FROM conversations ORDER BY created_at DESC LIMIT 100').all())));
